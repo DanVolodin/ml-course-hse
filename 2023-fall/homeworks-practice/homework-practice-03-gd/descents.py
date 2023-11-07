@@ -65,7 +65,10 @@ class BaseDescent:
         :param y: targets array
         :return: gradient: np.ndarray
         """
-        pass
+        if self.loss_function is LossFunction.MSE:
+            return 2 * x.T @ (self.predict(x) - y) / (1.0 * x.shape[0])
+        if self.loss_function is LossFunction.LogCosh:
+            return x.T @ np.tanh(self.predict(x) - y) / (1.0 * x.shape[0])
 
     def calc_loss(self, x: np.ndarray, y: np.ndarray) -> float:
         """
@@ -74,8 +77,10 @@ class BaseDescent:
         :param y: targets array
         :return: loss: float
         """
-        # TODO: implement loss calculation function
-        raise NotImplementedError('BaseDescent calc_loss function not implemented')
+        if self.loss_function is LossFunction.MSE:
+            return np.mean((self.predict(x) - y) ** 2)
+        if self.loss_function is LossFunction.LogCosh:
+            return np.mean(np.log(np.cosh(self.predict(x) - y)))
 
     def predict(self, x: np.ndarray) -> np.ndarray:
         """
@@ -83,8 +88,7 @@ class BaseDescent:
         :param x: features array
         :return: prediction: np.ndarray
         """
-        # TODO: implement prediction function
-        raise NotImplementedError('BaseDescent predict function not implemented')
+        return x @ self.w
 
 
 class VanillaGradientDescent(BaseDescent):
@@ -96,12 +100,12 @@ class VanillaGradientDescent(BaseDescent):
         """
         :return: weight difference (w_{k + 1} - w_k): np.ndarray
         """
-        # TODO: implement updating weights function
-        raise NotImplementedError('VanillaGradientDescent update_weights function not implemented')
+        weights_diff = -self.lr() * gradient
+        self.w += weights_diff
+        return weights_diff
 
     def calc_gradient(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        # TODO: implement calculating gradient function
-        raise NotImplementedError('VanillaGradientDescent calc_gradient function not implemented')
+        return super().calc_gradient(x, y)
 
 
 class StochasticDescent(VanillaGradientDescent):
@@ -118,8 +122,10 @@ class StochasticDescent(VanillaGradientDescent):
         self.batch_size = batch_size
 
     def calc_gradient(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        # TODO: implement calculating gradient function
-        raise NotImplementedError('StochasticDescent calc_gradient function not implemented')
+        indices = np.random.randint(0, x.shape[0], self.batch_size, dtype=int)
+        x_batch = x[indices]
+        y_batch = np.take(y, indices)
+        return super().calc_gradient(x_batch, y_batch)
 
 
 class MomentumDescent(VanillaGradientDescent):
@@ -137,9 +143,9 @@ class MomentumDescent(VanillaGradientDescent):
         """
         :return: weight difference (w_{k + 1} - w_k): np.ndarray
         """
-        # TODO: implement updating weights function
-        raise NotImplementedError('MomentumDescent update_weights function not implemented')
-
+        self.h = self.alpha * self.h + self.lr() * gradient
+        self.w -= self.h
+        return -self.h
 
 class Adam(VanillaGradientDescent):
     """
@@ -162,8 +168,18 @@ class Adam(VanillaGradientDescent):
         """
         :return: weight difference (w_{k + 1} - w_k): np.ndarray
         """
-        # TODO: implement updating weights function
-        raise NotImplementedError('Adagrad update_weights function not implemented')
+        self.iteration += 1
+
+        self.m = self.beta_1 * self.m + (1 - self.beta_1) * gradient
+        self.v = self.beta_2 * self.v + (1 - self.beta_2) * gradient ** 2
+        
+        m_hat = self.m / (1 - np.power(self.beta_1, self.iteration))
+        v_hat = self.v / (1 - np.power(self.beta_2, self.iteration))
+
+        weights_diff = -(self.lr() * m_hat / (np.sqrt(v_hat) + self.eps))
+        self.w += weights_diff 
+
+        return weights_diff
 
 
 class BaseDescentReg(BaseDescent):
@@ -183,7 +199,8 @@ class BaseDescentReg(BaseDescent):
         """
         Calculate gradient of loss function and L2 regularization with respect to weights
         """
-        l2_gradient: np.ndarray = np.zeros_like(x.shape[1])  # TODO: replace with L2 gradient calculation
+        l2_gradient = self.w
+        l2_gradient[-1] = 0 # bias
 
         return super().calc_gradient(x, y) + l2_gradient * self.mu
 
