@@ -5,6 +5,7 @@ from collections import defaultdict
 import numpy as np
 from sklearn.metrics import roc_auc_score
 from sklearn.tree import DecisionTreeRegressor
+import matplotlib.pyplot as plt
 
 
 def score(clf, x, y):
@@ -46,8 +47,18 @@ class Boosting:
         self.loss_derivative = lambda y, z: -y * self.sigmoid(-y * z)
 
     def fit_new_base_model(self, x, y, predictions):
-        self.gammas.append()
-        self.models.append()
+        bootstraped_ind = np.random.choice(x.shape[0], int(self.subsample * x.shape[0]))
+        targets = -self.loss_derivative(y, predictions)
+
+        x_boot = x[bootstraped_ind, :]
+        targets_boot = targets[bootstraped_ind]
+
+        model = self.base_model_class(**self.base_model_params)
+        model.fit(x_boot, targets_boot)
+        gamma = self.find_optimal_gamma(y, predictions, model.predict(x))
+
+        self.gammas.append(gamma)
+        self.models.append(model)
 
     def fit(self, x_train, y_train, x_valid, y_valid):
         """
@@ -59,15 +70,43 @@ class Boosting:
         train_predictions = np.zeros(y_train.shape[0])
         valid_predictions = np.zeros(y_valid.shape[0])
 
+        self.history['train_losses'] = []
+        self.history['valid_losses'] = []
+
+        best_loss = np.inf
+        cnt_bad_rounds = 0
+
         for _ in range(self.n_estimators):
-            self.fit_new_base_model()
+            self.fit_new_base_model(x_train, y_train, train_predictions)
+            train_predictions += self.learning_rate * self.gammas[-1] * self.models[-1].predict(x_train)
+            valid_predictions += self.learning_rate * self.gammas[-1] * self.models[-1].predict(x_valid)
 
-            if self.early_stopping_rounds is not None:
+            self.history['train_losses'].append(self.loss_fn(y_train, train_predictions))
+            self.history['valid_losses'].append(self.loss_fn(y_valid, valid_predictions))
 
+            best_loss = min(best_loss, self.history['valid_losses'][-1])
+
+            if self.early_stopping_rounds is not None and self.history['valid_losses'][-1] > best_loss:
+                cnt_bad_rounds += 1
+                if cnt_bad_rounds == self.early_stopping_rounds:
+                    continue
+                
         if self.plot:
+            fig = plt.figure(figsize=(12, 6))
+            plt.plot(self.history['train_losses'], label="Train loss")
+            plt.plot(self.history['valid_losses'], label="Valid loss")
+            plt.title("Losses while fitting")
+            plt.legend()
+            plt.show()
 
     def predict_proba(self, x):
+        prediction = np.zeros(x.shape[0])
         for gamma, model in zip(self.gammas, self.models):
+            prediction += gamma * self.learning_rate * model.predict(x)
+        probabilities = np.zeros((x.shape[0], 2))
+        probabilities[:, 1] = self.sigmoid(prediction)
+        probabilities[:, 0] = 1 - self.sigmoid(prediction)
+        return probabilities
 
     def find_optimal_gamma(self, y, old_predictions, new_predictions) -> float:
         gammas = np.linspace(start=0, stop=1, num=100)
@@ -80,4 +119,8 @@ class Boosting:
 
     @property
     def feature_importances_(self):
-        pass
+        feature_importances = np.zeros(self.models[0].feature_importances_.shape[0])
+        for model in self.models:
+            feature_importances += model.feature_importances_
+        feature_importances /= 1.0 * len(self.models)
+        return feature_importances / np.sum(feature_importances)
